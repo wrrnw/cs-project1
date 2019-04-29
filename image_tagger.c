@@ -59,6 +59,7 @@ struct Player
     char* name;
     bool hasRegistered;
     bool isPlaying;
+    bool isGuessing;
 };
 
 struct Player* createNewPlayer()
@@ -67,6 +68,7 @@ struct Player* createNewPlayer()
   newPlayer->name = NULL;
   newPlayer->hasRegistered = false;
   newPlayer->isPlaying = false;
+  newPlayer->isGuessing = false;
   return newPlayer;
 }
 
@@ -117,42 +119,47 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
         // player haven't sent the name to server
         if(!currentPlayer->hasRegistered)
         {
-          if (method == GET)
-          {
-              showIntroPage(n, buff, sockfd);
-          }
-          else if (method == POST)
-          {
-            // locate the username, it is safe to do so in this sample code, but usually the result is expected to be
-            // copied to another buffer using strcpy or strncpy to ensure that it will not be overwritten.
-            char * username = strstr(buff, "user=") + 5;
-            //strcpy(currentPlayer->name, username);
-            //printf("username = %s\n", currentPlayer->name);
-            showStartPage(n, buff, sockfd, username);
-            currentPlayer->hasRegistered = true;
-          }
-          else
-          {
-              // never used, just for completeness
-              fprintf(stderr, "no other methods supported");
-          }
+            if (method == GET)
+            {
+                showIntroPage(n, buff, sockfd);
+            }
+            else if (method == POST)
+            {
+                // locate the username, it is safe to do so in this sample code, but usually the result is expected to be
+                // copied to another buffer using strcpy or strncpy to ensure that it will not be overwritten.
+                char * username = strstr(buff, "user=") + 5;
+                //strcpy(currentPlayer->name, username);
+                //printf("username = %s\n", currentPlayer->name);
+                showStartPage(n, buff, sockfd, username);
+                currentPlayer->hasRegistered = true;
+            }
+            else
+            {
+                // never used, just for completeness
+                fprintf(stderr, "no other methods supported");
+            }
         }
 
         // if the player has sent name to the server
         else if(currentPlayer->hasRegistered)
         {
-          // if the player click the 'start' button
-          if(method == GET)
-          {
-            currentPlayer->isPlaying = true;
-            showFirstTurnPage(n, buff, sockfd);
-          }
-          // if the player click the 'quit' button
-          else if(strstr(buff, "quit=Quit") != NULL)
-          {
-            currentPlayer->isPlaying = false;
-            showGameoverPage(n, buff, sockfd);
-          }
+            // if the player click the 'start' button
+            if(method == GET)
+            {
+                currentPlayer->isPlaying = true;
+                showFirstTurnPage(n, buff, sockfd);
+            }
+            // if the player click the 'quit' button
+            else if(method == POST)
+            {
+                currentPlayer->isPlaying = false;
+                showGameoverPage(n, buff, sockfd);
+            }
+            else
+            {
+                // never used, just for completeness
+                fprintf(stderr, "no other methods supported");
+            }
         }
 
 
