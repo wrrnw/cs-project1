@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -38,8 +39,12 @@ static char const* const DISCARDED_PAGE = "./thml/5_discarded.html";
 static char const* const ENDGAME_PAGE = "./html/6_endgame.html";
 static char const* const GAMEOVER_PAGE = "./html/7_gameover.html";
 
+// function prototype
 int InitialiseServerSocket(const char* readableIP, const int portNumber);
 int showIntroPage(int n, char* buff, int sockfd);
+int showStartPage(int n, char* buff, int sockfd, char* username);
+int showFirstTurnPage(int n, char* buff, int sockfd);
+int showGameoverPage(int n, char* buff, int sockfd);
 
 // represents the types of method
 typedef enum
@@ -49,7 +54,23 @@ typedef enum
     UNKNOWN
 } METHOD;
 
-static bool handleHttpRequest(int sockfd)
+struct Player
+{
+    char* name;
+    bool hasRegistered;
+    bool isPlaying;
+};
+
+struct Player* createNewPlayer()
+{
+  struct Player* newPlayer = malloc(sizeof(struct Player));
+  newPlayer->name = NULL;
+  newPlayer->hasRegistered = false;
+  newPlayer->isPlaying = false;
+  return newPlayer;
+}
+
+static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
 {
     // try to read the request
     char buff[2049];
@@ -90,67 +111,58 @@ static bool handleHttpRequest(int sockfd)
     while (*curr == '.' || *curr == '/')
         ++curr;
     // assume the only valid request URI is "/" but it can be modified to accept more files
-    if (*curr == ' ')
-        if (method == GET)
+    if (*curr == ' ' || *curr == '?')
+    {
+
+        // player haven't sent the name to server
+        if(!currentPlayer->hasRegistered)
         {
-            showIntroPage(n, buff, sockfd);
-        }
-        else if (method == POST)
-        {
+          if (method == GET)
+          {
+              showIntroPage(n, buff, sockfd);
+          }
+          else if (method == POST)
+          {
             // locate the username, it is safe to do so in this sample code, but usually the result is expected to be
             // copied to another buffer using strcpy or strncpy to ensure that it will not be overwritten.
             char * username = strstr(buff, "user=") + 5;
-            int username_length = strlen(username);
-            // the length needs to include the ", " before the username
-            long added_length = username_length + 2;
-
-            // get the size of the file
-            struct stat st;
-            stat(START_PAGE, &st);
-            // increase file size to accommodate the username
-            long size = st.st_size + added_length;
-            n = sprintf(buff, HTTP_200_FORMAT, size);
-            // send the header first
-            if (write(sockfd, buff, n) < 0)
-            {
-                perror("write");
-                return false;
-            }
-            // read the content of the HTML file
-            int filefd = open(START_PAGE, O_RDONLY);
-            n = read(filefd, buff, 2048);
-            if (n < 0)
-            {
-                perror("read");
-                close(filefd);
-                return false;
-            }
-            close(filefd);
-
-            // move the trailing part backward
-            int p1, p2;
-            for (p1 = size - 1, p2 = p1 - added_length; p1 >= size - 25; --p1, --p2)
-                buff[p1] = buff[p2];
-            ++p2;
-            // put the separator
-            buff[p2++] = ',';
-            buff[p2++] = ' ';
-            // copy the username
-            strncpy(buff + p2, username, username_length);
-            if (write(sockfd, buff, size) < 0)
-            {
-                perror("write");
-                return false;
-            }
+            //strcpy(currentPlayer->name, username);
+            //printf("username = %s\n", currentPlayer->name);
+            showStartPage(n, buff, sockfd, username);
+            currentPlayer->hasRegistered = true;
+          }
+          else
+          {
+              // never used, just for completeness
+              fprintf(stderr, "no other methods supported");
+          }
         }
-        else
-            // never used, just for completeness
-            fprintf(stderr, "no other methods supported");
-    // send 404
-    else if (write(sockfd, HTTP_404, HTTP_404_LENGTH) < 0)
-    {
-        perror("write");
-        return false;
+
+        // if the player has sent name to the server
+        else if(currentPlayer->hasRegistered)
+        {
+          // if the player click the 'start' button
+          if(method == GET)
+          {
+            currentPlayer->isPlaying = true;
+            showFirstTurnPage(n, buff, sockfd);
+          }
+          // if the player click the 'quit' button
+          else if(strstr(buff, "quit=Quit") != NULL)
+          {
+            currentPlayer->isPlaying = false;
+            showGameoverPage(n, buff, sockfd);
+          }
+        }
+
+
+
+        // send 404
+        else if (write(sockfd, HTTP_404, HTTP_404_LENGTH) < 0)
+        {
+            perror("write");
+            return false;
+        }
     }
 
     return true;
@@ -159,7 +171,8 @@ static bool handleHttpRequest(int sockfd)
 /* Show Intro Page on users' browser
  * Derived from lab-6 http-server.c
  */
-int showIntroPage(int n, char* buff, int sockfd) {
+int showIntroPage(int n, char* buff, int sockfd)
+{
   // get the size of the file
   struct stat st;
   stat(INTRO_PAGE, &st);
@@ -187,10 +200,134 @@ int showIntroPage(int n, char* buff, int sockfd) {
   return 1;
 }
 
+
+/* Show Start Page on users' browser
+ * Derived from lab-6 http-server.c
+ */
+int showStartPage(int n, char* buff, int sockfd, char* username)
+{
+
+  int username_length = strlen(username);
+  // the length needs to include the ", " before the username
+  long added_length = username_length + 2;
+  // get the size of the file
+  struct stat st;
+  stat(START_PAGE, &st);
+  // increase file size to accommodate the username
+  long size = st.st_size + added_length;
+  n = sprintf(buff, HTTP_200_FORMAT, size);
+  // send the header first
+  if (write(sockfd, buff, n) < 0)
+  {
+      perror("write");
+      return false;
+  }
+  // read the content of the HTML file
+  int filefd = open(START_PAGE, O_RDONLY);
+  n = read(filefd, buff, 2048);
+  if (n < 0)
+  {
+      perror("read");
+      close(filefd);
+      return false;
+  }
+  close(filefd);
+
+  // move the trailing part backward
+  int p1, p2;
+  for (p1 = size - 1, p2 = p1 - added_length; p1 >= size - 25; --p1, --p2)
+      buff[p1] = buff[p2];
+  ++p2;
+  // put the separator
+  buff[p2++] = ',';
+  buff[p2++] = ' ';
+  // copy the username
+  strncpy(buff + p2, username, username_length);
+  if (write(sockfd, buff, size) < 0)
+  {
+      perror("write");
+      return false;
+  }
+
+  return 1;
+
+}
+
+
+
+/* Show First Turn Page on users' browser
+ * Derived from lab-6 http-server.c
+ */
+int showFirstTurnPage(int n, char* buff, int sockfd)
+{
+  // get the size of the file
+  struct stat st;
+  stat(FIRST_TURN_PAGE, &st);
+  n = sprintf(buff, HTTP_200_FORMAT, st.st_size);
+  // send the header first
+  if (write(sockfd, buff, n) < 0)
+  {
+      perror("write");
+      return false;
+  }
+  // send the file
+  int filefd = open(FIRST_TURN_PAGE, O_RDONLY);
+  do
+  {
+      n = sendfile(sockfd, filefd, NULL, 2048);
+  }
+  while (n > 0);
+  if (n < 0)
+  {
+      perror("sendfile");
+      close(filefd);
+      return false;
+  }
+  close(filefd);
+  return 1;
+}
+
+
+
+/* Show Gameover Page on users' browser
+ * Derived from lab-6 http-server.c
+ */
+int showGameoverPage(int n, char* buff, int sockfd)
+{
+  // get the size of the file
+  struct stat st;
+  stat(GAMEOVER_PAGE, &st);
+  n = sprintf(buff, HTTP_200_FORMAT, st.st_size);
+  // send the header first
+  if (write(sockfd, buff, n) < 0)
+  {
+      perror("write");
+      return false;
+  }
+  // send the file
+  int filefd = open(GAMEOVER_PAGE, O_RDONLY);
+  do
+  {
+      n = sendfile(sockfd, filefd, NULL, 2048);
+  }
+  while (n > 0);
+  if (n < 0)
+  {
+      perror("sendfile");
+      close(filefd);
+      return false;
+  }
+  close(filefd);
+  return 1;
+}
+
+
+
 /* Initialise the server sockets
  * Derived from lab6 http-server.c
  */
-int InitialiseServerSocket(const char* readableIP, const int portNumber) {
+int InitialiseServerSocket(const char* readableIP, const int portNumber)
+{
   // create TCP socket which only accept IPv4
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd < 0)
@@ -231,6 +368,7 @@ int main(int argc, char * argv[])
     const char* readableIP;
     int portNumber;
     int sockfd;
+    struct Player* currentPlayer = createNewPlayer();
 
     // check command format
     if (argc < 3)
@@ -252,6 +390,7 @@ int main(int argc, char * argv[])
     }
 
     printf("image_tagger server is now running at IP: %s on port %d\n", readableIP, portNumber);
+
 
     // initialise an active file descriptors set
     fd_set masterfds;
@@ -302,7 +441,7 @@ int main(int argc, char * argv[])
                     }
                 }
                 // a request is sent from the client
-                else if (!handleHttpRequest(i))
+                else if (!handleHttpRequest(i, currentPlayer))
                 {
                     close(i);
                     FD_CLR(i, &masterfds);
