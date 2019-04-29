@@ -47,6 +47,7 @@ int showIntroPage(int n, char* buff, int sockfd);
 int showStartPage(int n, char* buff, int sockfd, char* username);
 int showFirstTurnPage(int n, char* buff, int sockfd);
 int showGameoverPage(int n, char* buff, int sockfd);
+int showDiscardedPage(int n, char* buff, int sockfd);
 
 // represents the types of method
 typedef enum
@@ -67,7 +68,7 @@ struct Player
 
 };
 
-struct Player* createNewPlayer()
+static struct Player* createNewPlayer()
 {
   struct Player* newPlayer = malloc(sizeof(struct Player));
   newPlayer->ID = -1;
@@ -130,7 +131,7 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
                 showIntroPage(n, buff, sockfd);
             }
             // if the player has registered and click the 'start' button
-            else if(currentPlayer->hasRegistered)
+            else if(strstr(buff, "start=Start") != NULL)
             {
                 currentPlayer->isPlaying = true;
                 showFirstTurnPage(n, buff, sockfd);
@@ -141,8 +142,15 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
 
         else if (method == POST)
         {
+            // if the player has registered and click the 'quit' button
+            if(strstr(buff, "quit=") != NULL)
+            {
+                currentPlayer->isPlaying = false;
+                showGameoverPage(n, buff, sockfd);
+            }
+
             // if the player hasn't registered
-            if(!currentPlayer->hasRegistered)
+            else if(strstr(buff, "user=") != NULL)
             {
                 // locate the username, it is safe to do so in this sample code, but usually the result is expected to be
                 // copied to another buffer using strcpy or strncpy to ensure that it will not be overwritten.
@@ -153,12 +161,7 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
                 currentPlayer->hasRegistered = true;
             }
 
-            // if the player has registered and click the 'quit' button
-            else if(currentPlayer->hasRegistered)
-            {
-                currentPlayer->isPlaying = false;
-                showGameoverPage(n, buff, sockfd);
-            }
+
         }
 
         else
@@ -180,6 +183,97 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
 
     return true;
 }
+
+
+
+
+int main(int argc, char * argv[])
+{
+    const char* readableIP;
+    int portNumber;
+    int sockfd;
+    struct Player* currentPlayer = createNewPlayer();
+    struct Player* otherPlayer = createNewPlayer();
+    // check command format
+    if (argc < 3)
+    {
+        fprintf(stderr, "usage: %s ip port\n", argv[0]);
+      return 0;
+    }
+
+    readableIP = argv[1];
+    portNumber = atoi(argv[2]);
+
+    sockfd = InitialiseServerSocket(readableIP, portNumber);
+
+    // listen on the socket, support two connection with two client browser simultaneously
+    listen(sockfd, 5);
+
+    printf("image_tagger server is now running at IP: %s on port %d\n", readableIP, portNumber);
+
+    // initialise an active file descriptors set
+    fd_set masterfds;
+    FD_ZERO(&masterfds);
+    FD_SET(sockfd, &masterfds);
+    // record the maximum socket number
+    int maxfd = sockfd;
+
+    // acheive persistent TCP connection
+    while (1)
+    {
+        // monitor file descriptors
+        fd_set readfds = masterfds;
+        if (select(FD_SETSIZE, &readfds, NULL, NULL, NULL) < 0)
+        {
+            perror("select");
+            exit(EXIT_FAILURE);
+        }
+
+        // loop all possible descriptor
+        for (int i = 0; i <= maxfd; ++i)
+            // determine if the current file descriptor is active
+            if (FD_ISSET(i, &readfds))
+            {
+                // create new socket if there is new incoming connection request
+                if (i == sockfd)
+                {
+                    struct sockaddr_in cliaddr;
+                    socklen_t clilen = sizeof(cliaddr);
+                    int newsockfd = accept(sockfd, (struct sockaddr *)&cliaddr, &clilen);
+                    if (newsockfd < 0)
+                        perror("accept");
+                    else
+                    {
+                        // add the socket to the set
+                        FD_SET(newsockfd, &masterfds);
+                        // update the maximum tracker
+                        if (newsockfd > maxfd)
+                            maxfd = newsockfd;
+                        // print out the IP and the socket number
+                        char ip[INET_ADDRSTRLEN];
+                        printf(
+                            "new connection from %s on socket %d\n",
+                            // convert to human readable string
+                            inet_ntop(cliaddr.sin_family, &cliaddr.sin_addr, ip, INET_ADDRSTRLEN),
+                            newsockfd
+                        );
+                    }
+                }
+                // a request is sent from the client
+                else if (!handleHttpRequest(i, currentPlayer))
+                {
+                    close(i);
+                    FD_CLR(i, &masterfds);
+                }
+            }
+    }
+
+    return 0;
+}
+
+
+
+
 
 /* Show Intro Page on users' browser
  * Derived from lab-6 http-server.c
@@ -222,7 +316,7 @@ int showStartPage(int n, char* buff, int sockfd, char* username)
 
   int username_length = strlen(username);
   // the length needs to include the ", " before the username
-  long added_length = username_length + 2;
+  long added_length = username_length + 9;
   // get the size of the file
   struct stat st;
   stat(START_PAGE, &st);
@@ -335,6 +429,38 @@ int showGameoverPage(int n, char* buff, int sockfd)
 }
 
 
+/* Show Discarded Page on users' browser
+ * Derived from lab-6 http-server.c
+ */
+int showDiscardedPage(int n, char* buff, int sockfd)
+{
+  // get the size of the file
+  struct stat st;
+  stat(DISCARDED_PAGE, &st);
+  n = sprintf(buff, HTTP_200_FORMAT, st.st_size);
+  // send the header first
+  if (write(sockfd, buff, n) < 0)
+  {
+      perror("write");
+      return false;
+  }
+  // send the file
+  int filefd = open(DISCARDED_PAGE, O_RDONLY);
+  do
+  {
+      n = sendfile(sockfd, filefd, NULL, 2048);
+  }
+  while (n > 0);
+  if (n < 0)
+  {
+      perror("sendfile");
+      close(filefd);
+      return false;
+  }
+  close(filefd);
+  return 1;
+}
+
 
 /* Initialise the server sockets
  * Derived from lab6 http-server.c
@@ -373,92 +499,4 @@ int InitialiseServerSocket(const char* readableIP, const int portNumber)
   }
 
   return sockfd;
-}
-
-
-int main(int argc, char * argv[])
-{
-    const char* readableIP;
-    int portNumber;
-    int sockfd;
-    struct Player* currentPlayer = createNewPlayer();
-
-    // check command format
-    if (argc < 3)
-    {
-        fprintf(stderr, "usage: %s ip port\n", argv[0]);
-      return 0;
-    }
-
-    readableIP = argv[1];
-    portNumber = atoi(argv[2]);
-
-    sockfd = InitialiseServerSocket(readableIP, portNumber);
-
-    // listen on the socket, support two connection with two client browser simultaneously
-    listen(sockfd, 5);
-
-
-
-    printf("image_tagger server is now running at IP: %s on port %d\n", readableIP, portNumber);
-
-
-    // initialise an active file descriptors set
-    fd_set masterfds;
-    FD_ZERO(&masterfds);
-    FD_SET(sockfd, &masterfds);
-    // record the maximum socket number
-    int maxfd = sockfd;
-
-    // acheive persistent TCP connection
-    while (1)
-    {
-        // monitor file descriptors
-        fd_set readfds = masterfds;
-        if (select(FD_SETSIZE, &readfds, NULL, NULL, NULL) < 0)
-        {
-            perror("select");
-            exit(EXIT_FAILURE);
-        }
-
-        // loop all possible descriptor
-        for (int i = 0; i <= maxfd; ++i)
-            // determine if the current file descriptor is active
-            if (FD_ISSET(i, &readfds))
-            {
-                // create new socket if there is new incoming connection request
-                if (i == sockfd)
-                {
-                    struct sockaddr_in cliaddr;
-                    socklen_t clilen = sizeof(cliaddr);
-                    int newsockfd = accept(sockfd, (struct sockaddr *)&cliaddr, &clilen);
-                    if (newsockfd < 0)
-                        perror("accept");
-                    else
-                    {
-                        // add the socket to the set
-                        FD_SET(newsockfd, &masterfds);
-                        // update the maximum tracker
-                        if (newsockfd > maxfd)
-                            maxfd = newsockfd;
-                        // print out the IP and the socket number
-                        char ip[INET_ADDRSTRLEN];
-                        printf(
-                            "new connection from %s on socket %d\n",
-                            // convert to human readable string
-                            inet_ntop(cliaddr.sin_family, &cliaddr.sin_addr, ip, INET_ADDRSTRLEN),
-                            newsockfd
-                        );
-                    }
-                }
-                // a request is sent from the client
-                else if (!handleHttpRequest(i, currentPlayer))
-                {
-                    close(i);
-                    FD_CLR(i, &masterfds);
-                }
-            }
-    }
-
-    return 0;
 }
