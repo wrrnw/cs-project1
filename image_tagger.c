@@ -1,6 +1,5 @@
 /*
  * image_tagger.c
- * author: Dongwei Wei
  * Deived from lab6 http-server.c
  */
 
@@ -24,6 +23,8 @@
 #include <unistd.h>
 
 // constants
+#define MAX_KEYWORD_LEN 20
+#define MAX_NUM_KEYWORDS_TO_GUESS 20
 static char const * const HTTP_200_FORMAT = "HTTP/1.1 200 OK\r\n\
 Content-Type: text/html\r\n\
 Content-Length: %ld\r\n\r\n";
@@ -38,16 +39,19 @@ static char const* const ACCEPTED_PAGE = "./html/4_acceptedhtml";
 static char const* const DISCARDED_PAGE = "./thml/5_discarded.html";
 static char const* const ENDGAME_PAGE = "./html/6_endgame.html";
 static char const* const GAMEOVER_PAGE = "./html/7_gameover.html";
-static const int MAX_KEYWORD_LEN = 20;
-static const int MAX_NUM_KEYWORDS_TO_GUESS = 20;
+
 
 // function prototype
+void initialisePlayersInfo();
 int InitialiseServerSocket(const char* readableIP, const int portNumber);
 int showIntroPage(int n, char* buff, int sockfd);
 int showStartPage(int n, char* buff, int sockfd, char* username);
 int showFirstTurnPage(int n, char* buff, int sockfd);
 int showGameoverPage(int n, char* buff, int sockfd);
 int showDiscardedPage(int n, char* buff, int sockfd);
+int showAcceptedPage(int n, char* buff, int sockfd);
+int showEndgamePage(int n, char* buff, int sockfd);
+bool checkFinish(int sockfd, char* wordTyped);
 
 // represents the types of method
 typedef enum
@@ -57,29 +61,40 @@ typedef enum
     UNKNOWN
 } METHOD;
 
-struct Player
-{
-    int ID;
-    char* name;
-    bool hasRegistered;
-    bool isPlaying;
-    bool isGuessing;
-    //char wordsList[MAX_NUM_KEYWORDS_TO_GUESS][MAX_KEYWORD_LEN] = '\0';
 
-};
+// set some values for player one and player two
+bool playerOneActive, playerTwoActive;
+int playerOneSocket, playerTwoSocket;
+char playerOneWordList[MAX_NUM_KEYWORDS_TO_GUESS][MAX_KEYWORD_LEN];
+char playerTwoWordList[MAX_NUM_KEYWORDS_TO_GUESS][MAX_KEYWORD_LEN];
+int playerOneGuessedNumber;
+int playerTwoGuessedNumber;
+bool finishGame;
+bool quitGame;
 
-static struct Player* createNewPlayer()
-{
-  struct Player* newPlayer = malloc(sizeof(struct Player));
-  newPlayer->ID = -1;
-  newPlayer->name = NULL;
-  newPlayer->hasRegistered = false;
-  newPlayer->isPlaying = false;
-  newPlayer->isGuessing = false;
-  return newPlayer;
-}
+// struct Player
+// {
+//     int ID;
+//     char* name;
+//     bool hasRegistered;
+//     bool isPlaying;
+//     bool isGuessing;
+//     //char wordsList[MAX_NUM_KEYWORDS_TO_GUESS][MAX_KEYWORD_LEN] = '\0';
+//
+// };
 
-static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
+// static struct Player* createNewPlayer()
+// {
+//   struct Player* newPlayer = malloc(sizeof(struct Player));
+//   newPlayer->ID = -1;
+//   newPlayer->name = NULL;
+//   newPlayer->hasRegistered = false;
+//   newPlayer->isPlaying = false;
+//   newPlayer->isGuessing = false;
+//   return newPlayer;
+// }
+
+static bool handleHttpRequest(int sockfd)
 {
     // try to read the request
     char buff[2049];
@@ -91,6 +106,25 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
         else
             printf("socket %d close the connection\n", sockfd);
         return false;
+    }
+
+    // if players are disconnected, reset the value of finishGame and quitGame
+    if (playerOneSocket < 0 && playerTwoSocket < 0){
+    	finishGame = false;
+    	quitGame = false;
+	   }
+
+  	// Record the players' socket if a new player conncet to server
+  	if (playerOneSocket < 0 && sockfd != playerTwoSocket)
+    {
+  		  playerOneSocket = sockfd;
+  	} else if (playerTwoSocket < 0 && sockfd != playerOneSocket)
+    {
+  		  playerTwoSocket = sockfd;
+  	} else if (!(playerOneSocket < 0) && !(playerTwoSocket < 0) && sockfd != playerOneSocket && sockfd != playerTwoSocket)
+    {
+        // too many player joined
+        exit(EXIT_FAILURE);
     }
 
     // terminate the string
@@ -126,15 +160,26 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
         if (method == GET)
         {
             // if the player hasn't registered
-            if(!currentPlayer->hasRegistered)
-            {
-                showIntroPage(n, buff, sockfd);
-            }
+            // if(!currentPlayer->hasRegistered)
+            // {
+            //     showIntroPage(n, buff, sockfd);
+            // }
             // if the player has registered and click the 'start' button
-            else if(strstr(buff, "start=Start") != NULL)
+            if (strstr(buff, "start=Start") != NULL)
             {
-                currentPlayer->isPlaying = true;
+                //currentPlayer->isPlaying = true;
+                // modify the state of the player who are ready to play
+                if (sockfd == playerOneSocket)
+                {
+                    playerOneActive = true;
+                } else if (sockfd == playerTwoSocket)
+                {
+                    playerTwoActive = true;
+                }
                 showFirstTurnPage(n, buff, sockfd);
+
+            } else {
+                showIntroPage(n, buff, sockfd);
             }
 
 
@@ -142,15 +187,28 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
 
         else if (method == POST)
         {
-            // if the player has registered and click the 'quit' button
-            if(strstr(buff, "quit=") != NULL)
+            // if the player click the 'quit' button
+            if (strstr(buff, "quit=") != NULL)
             {
-                currentPlayer->isPlaying = false;
+                // reset the info of the player who quitted
+                if (sockfd == playerOneSocket)
+                {
+                  playerOneSocket = -1;
+                  playerOneActive = false;
+                  quitGame = true;
+                } else if (sockfd == playerTwoSocket)
+                {
+                  playerTwoSocket = -1;
+                  playerTwoActive = false;
+                  quitGame = true;
+                }
+
+                //currentPlayer->isPlaying = false;
                 showGameoverPage(n, buff, sockfd);
             }
 
-            // if the player hasn't registered
-            else if(strstr(buff, "user=") != NULL)
+            // if the player type name and click "submit" button
+            else if (strstr(buff, "user=") != NULL)
             {
                 // locate the username, it is safe to do so in this sample code, but usually the result is expected to be
                 // copied to another buffer using strcpy or strncpy to ensure that it will not be overwritten.
@@ -158,7 +216,73 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
                 //strcpy(currentPlayer->name, username);
                 //printf("username = %s\n", currentPlayer->name);
                 showStartPage(n, buff, sockfd, username);
-                currentPlayer->hasRegistered = true;
+                //currentPlayer->hasRegistered = true;
+            }
+
+            // if the player click the "guess" button
+            else if (strstr(buff, "guess") != NULL)
+            {
+               char* getKeyword = strstr(buff, "keyword=") + 8;
+
+               // if one of players has quitted the game
+               if (quitGame)
+               {
+                  showGameoverPage(n, buff, sockfd);
+               }
+
+               // if the game has finished
+               if (finishGame)
+               {
+                  if (sockfd == playerOneSocket)
+                  {
+                    playerOneSocket = -1;
+                    playerOneActive = false;
+                    playerOneGuessedNumber = 0;
+                  } else if (sockfd == playerTwoSocket)
+                  {
+                    playerTwoSocket = -1;
+                    playerTwoActive = false;
+                    playerTwoGuessedNumber = 0;
+                  }
+                  showEndgamePage(n, buff, sockfd);
+               }
+
+               // if both players are ready to play
+               if (playerOneActive && playerTwoActive)
+               {
+                  // if game finished
+                  if (checkFinish(sockfd, getKeyword)) {
+
+                      if (sockfd == playerOneSocket) {
+                          // mofidy the info of both player
+                          playerOneSocket = -1;
+                          playerOneActive = false;
+                          playerOneGuessedNumber = 0;
+                          playerTwoSocket = -1;
+                          playerTwoActive = false;
+                          playerTwoGuessedNumber = 0;
+
+                      showEndgamePage(n, buff, sockfd);
+                      }
+                  }
+                  // if game not finished yet
+                  else
+                  {
+                      if (sockfd == playerOneSocket)
+                      {
+                          strcpy(playerOneWordList[playerOneGuessedNumber++], getKeyword);
+                      } else if (sockfd == playerTwoSocket)
+                      {
+                          strcpy(playerOneWordList[playerTwoGuessedNumber++], getKeyword);
+                      }
+                      showAcceptedPage(n, buff, sockfd);
+                  }
+               }
+               // if not both players are active
+               else
+               {
+                  showDiscardedPage(n, buff, sockfd);
+               }
             }
 
 
@@ -192,8 +316,8 @@ int main(int argc, char * argv[])
     const char* readableIP;
     int portNumber;
     int sockfd;
-    struct Player* currentPlayer = createNewPlayer();
-    struct Player* otherPlayer = createNewPlayer();
+    // struct Player* currentPlayer = createNewPlayer();
+    // struct Player* otherPlayer = createNewPlayer();
     // check command format
     if (argc < 3)
     {
@@ -203,6 +327,9 @@ int main(int argc, char * argv[])
 
     readableIP = argv[1];
     portNumber = atoi(argv[2]);
+
+
+    initialisePlayersInfo();
 
     sockfd = InitialiseServerSocket(readableIP, portNumber);
 
@@ -260,7 +387,7 @@ int main(int argc, char * argv[])
                     }
                 }
                 // a request is sent from the client
-                else if (!handleHttpRequest(i, currentPlayer))
+                else if (!handleHttpRequest(i))
                 {
                     close(i);
                     FD_CLR(i, &masterfds);
@@ -272,7 +399,19 @@ int main(int argc, char * argv[])
 }
 
 
-
+/* Initialise players infomation
+ */
+void initialisePlayersInfo()
+{
+      playerOneActive = false;
+      playerTwoActive = false;
+  	  playerOneSocket = -1;
+      playerTwoSocket = -1;
+  	  playerOneGuessedNumber = 0;
+      playerTwoGuessedNumber = 0;
+     	finishGame = false;
+  	  quitGame = false;
+}
 
 
 /* Show Intro Page on users' browser
@@ -395,7 +534,6 @@ int showFirstTurnPage(int n, char* buff, int sockfd)
 }
 
 
-
 /* Show Gameover Page on users' browser
  * Derived from lab-6 http-server.c
  */
@@ -462,6 +600,73 @@ int showDiscardedPage(int n, char* buff, int sockfd)
 }
 
 
+
+/* Show Endgame Page on users' browser
+ * Derived from lab-6 http-server.c
+ */
+int showEndgamePage(int n, char* buff, int sockfd)
+{
+  // get the size of the file
+  struct stat st;
+  stat(ENDGAME_PAGE, &st);
+  n = sprintf(buff, HTTP_200_FORMAT, st.st_size);
+  // send the header first
+  if (write(sockfd, buff, n) < 0)
+  {
+      perror("write");
+      return false;
+  }
+  // send the file
+  int filefd = open(ENDGAME_PAGE, O_RDONLY);
+  do
+  {
+      n = sendfile(sockfd, filefd, NULL, 2048);
+  }
+  while (n > 0);
+  if (n < 0)
+  {
+      perror("sendfile");
+      close(filefd);
+      return false;
+  }
+  close(filefd);
+  return 1;
+}
+
+
+
+/* Show Accepted Page on users' browser
+ * Derived from lab-6 http-server.c
+ */
+int showAcceptedPage(int n, char* buff, int sockfd)
+{
+  // get the size of the file
+  struct stat st;
+  stat(ACCEPTED_PAGE, &st);
+  n = sprintf(buff, HTTP_200_FORMAT, st.st_size);
+  // send the header first
+  if (write(sockfd, buff, n) < 0)
+  {
+      perror("write");
+      return false;
+  }
+  // send the file
+  int filefd = open(ACCEPTED_PAGE, O_RDONLY);
+  do
+  {
+      n = sendfile(sockfd, filefd, NULL, 2048);
+  }
+  while (n > 0);
+  if (n < 0)
+  {
+      perror("sendfile");
+      close(filefd);
+      return false;
+  }
+  close(filefd);
+  return 1;
+}
+
 /* Initialise the server sockets
  * Derived from lab6 http-server.c
  */
@@ -499,4 +704,34 @@ int InitialiseServerSocket(const char* readableIP, const int portNumber)
   }
 
   return sockfd;
+}
+
+
+
+
+// check if the game is finished by compare word to other player's word list
+bool checkFinish(int sockfd, char* wordTyped) {
+  if (playerOneGuessedNumber > 20 || playerTwoGuessedNumber > 20) {
+    return true;
+  }
+	if (sockfd == playerOneSocket) {
+		for (int i = 0; i < playerTwoGuessedNumber; i++){
+			if (strcmp(wordTyped, playerTwoWordList[i]) == 0) {
+				finishGame = true;
+				return true;
+			}
+		}
+		strcpy(playerOneWordList[playerOneGuessedNumber], wordTyped);
+		playerOneGuessedNumber++;
+	} else if (sockfd == playerTwoSocket) {
+		for (int i = 0; i < playerOneGuessedNumber; i++){
+			if (strcmp(wordTyped, playerOneWordList[i]) == 0) {
+				finishGame = true;
+				return true;
+			}
+		}
+		strcpy(playerTwoWordList[playerTwoGuessedNumber], wordTyped);
+		playerTwoGuessedNumber++;
+	}
+	return false;
 }
