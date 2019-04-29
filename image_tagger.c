@@ -38,6 +38,8 @@ static char const* const ACCEPTED_PAGE = "./html/4_acceptedhtml";
 static char const* const DISCARDED_PAGE = "./thml/5_discarded.html";
 static char const* const ENDGAME_PAGE = "./html/6_endgame.html";
 static char const* const GAMEOVER_PAGE = "./html/7_gameover.html";
+static const int MAX_KEYWORD_LEN = 20;
+static const int MAX_NUM_KEYWORDS_TO_GUESS = 20;
 
 // function prototype
 int InitialiseServerSocket(const char* readableIP, const int portNumber);
@@ -56,15 +58,19 @@ typedef enum
 
 struct Player
 {
+    int ID;
     char* name;
     bool hasRegistered;
     bool isPlaying;
     bool isGuessing;
+    //char wordsList[MAX_NUM_KEYWORDS_TO_GUESS][MAX_KEYWORD_LEN] = '\0';
+
 };
 
 struct Player* createNewPlayer()
 {
   struct Player* newPlayer = malloc(sizeof(struct Player));
+  newPlayer->ID = -1;
   newPlayer->name = NULL;
   newPlayer->hasRegistered = false;
   newPlayer->isPlaying = false;
@@ -112,18 +118,31 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
     // sanitise the URI
     while (*curr == '.' || *curr == '/')
         ++curr;
-    // assume the only valid request URI is "/" but it can be modified to accept more files
+    // assume the only valid request URIs are "/" and "?" but it can be modified to accept more files
     if (*curr == ' ' || *curr == '?')
     {
 
-        // player haven't sent the name to server
-        if(!currentPlayer->hasRegistered)
+        if (method == GET)
         {
-            if (method == GET)
+            // if the player hasn't registered
+            if(!currentPlayer->hasRegistered)
             {
                 showIntroPage(n, buff, sockfd);
             }
-            else if (method == POST)
+            // if the player has registered and click the 'start' button
+            else if(currentPlayer->hasRegistered)
+            {
+                currentPlayer->isPlaying = true;
+                showFirstTurnPage(n, buff, sockfd);
+            }
+
+
+        }
+
+        else if (method == POST)
+        {
+            // if the player hasn't registered
+            if(!currentPlayer->hasRegistered)
             {
                 // locate the username, it is safe to do so in this sample code, but usually the result is expected to be
                 // copied to another buffer using strcpy or strncpy to ensure that it will not be overwritten.
@@ -133,44 +152,31 @@ static bool handleHttpRequest(int sockfd, struct Player* currentPlayer)
                 showStartPage(n, buff, sockfd, username);
                 currentPlayer->hasRegistered = true;
             }
-            else
-            {
-                // never used, just for completeness
-                fprintf(stderr, "no other methods supported");
-            }
-        }
 
-        // if the player has sent name to the server
-        else if(currentPlayer->hasRegistered)
-        {
-            // if the player click the 'start' button
-            if(method == GET)
-            {
-                currentPlayer->isPlaying = true;
-                showFirstTurnPage(n, buff, sockfd);
-            }
-            // if the player click the 'quit' button
-            else if(method == POST)
+            // if the player has registered and click the 'quit' button
+            else if(currentPlayer->hasRegistered)
             {
                 currentPlayer->isPlaying = false;
                 showGameoverPage(n, buff, sockfd);
             }
-            else
-            {
-                // never used, just for completeness
-                fprintf(stderr, "no other methods supported");
-            }
         }
 
-
-
-        // send 404
-        else if (write(sockfd, HTTP_404, HTTP_404_LENGTH) < 0)
+        else
         {
-            perror("write");
-            return false;
+            // never used, just for completeness
+            fprintf(stderr, "No other methods supported\n");
         }
     }
+
+
+
+    // send 404
+    else if (write(sockfd, HTTP_404, HTTP_404_LENGTH) < 0)
+    {
+        perror("write");
+        return false;
+    }
+
 
     return true;
 }
@@ -390,11 +396,9 @@ int main(int argc, char * argv[])
     sockfd = InitialiseServerSocket(readableIP, portNumber);
 
     // listen on the socket, support two connection with two client browser simultaneously
-    if (listen(sockfd, 2) < 0)
-    {
-      perror("listen");
-      exit(EXIT_FAILURE);
-    }
+    listen(sockfd, 5);
+
+
 
     printf("image_tagger server is now running at IP: %s on port %d\n", readableIP, portNumber);
 
