@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -std=c99 -O3 -Wall -Wpedantic
-EXE = server
-CFILE = server.c
+EXE = image_tagger
+CFILE = image_tagger.c
 
 all: $(EXE)
 
