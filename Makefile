@@ -9,4 +9,4 @@ $(EXE): $(CFILE)
 	$(CC) $(CFLAGS) -o $(EXE) $<
 
 clean:
-	rm $(EXE)
+	rm *.o $(EXE)

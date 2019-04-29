@@ -104,7 +104,7 @@ static bool handleHttpRequest(int sockfd)
 
             // get the size of the file
             struct stat st;
-            stat("lab6-POST.html", &st);
+            stat(START_PAGE, &st);
             // increase file size to accommodate the username
             long size = st.st_size + added_length;
             n = sprintf(buff, HTTP_200_FORMAT, size);
@@ -115,7 +115,7 @@ static bool handleHttpRequest(int sockfd)
                 return false;
             }
             // read the content of the HTML file
-            int filefd = open("INTRO_PAGE", O_RDONLY);
+            int filefd = open(START_PAGE, O_RDONLY);
             n = read(filefd, buff, 2048);
             if (n < 0)
             {
@@ -124,6 +124,7 @@ static bool handleHttpRequest(int sockfd)
                 return false;
             }
             close(filefd);
+
             // move the trailing part backward
             int p1, p2;
             for (p1 = size - 1, p2 = p1 - added_length; p1 >= size - 25; --p1, --p2)
