@@ -28,6 +28,16 @@ static char const * const HTTP_400 = "HTTP/1.1 400 Bad Request\r\nContent-Length
 static int const HTTP_400_LENGTH = 47;
 static char const * const HTTP_404 = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
 static int const HTTP_404_LENGTH = 45;
+static char const* const INTRO_PAGE = "./html/1_intro.html";
+static char const* const START_PAGE = "./html/2_start.html";
+static char const* const FIRST_TURN_PAGE = "./html/3_first_turn.html";
+static char const* const ACCEPTED_PAGE = "./html/4_acceptedhtml";
+static char const* const DISCARDED_PAGE = "./thml/5_discarded.html";
+static char const* const ENDGAME_PAGE = "./html/6_endgame.html";
+static char const* const GAMEOVER_PAGE = "./html/7_gameover.html";
+
+int InitialiseServerSocket(const char* readableIP, const int portNumber);
+int showIntroPage(int n, char* buff, int sockfd);
 
 // represents the types of method
 typedef enum
@@ -37,7 +47,7 @@ typedef enum
     UNKNOWN
 } METHOD;
 
-static bool handle_http_request(int sockfd)
+static bool handleHttpRequest(int sockfd)
 {
     // try to read the request
     char buff[2049];
@@ -81,30 +91,7 @@ static bool handle_http_request(int sockfd)
     if (*curr == ' ')
         if (method == GET)
         {
-            // get the size of the file
-            struct stat st;
-            stat("lab6-GET.html", &st);
-            n = sprintf(buff, HTTP_200_FORMAT, st.st_size);
-            // send the header first
-            if (write(sockfd, buff, n) < 0)
-            {
-                perror("write");
-                return false;
-            }
-            // send the file
-            int filefd = open("lab6-GET.html", O_RDONLY);
-            do
-            {
-                n = sendfile(sockfd, filefd, NULL, 2048);
-            }
-            while (n > 0);
-            if (n < 0)
-            {
-                perror("sendfile");
-                close(filefd);
-                return false;
-            }
-            close(filefd);
+            showIntroPage(n, buff, sockfd);
         }
         else if (method == POST)
         {
@@ -128,7 +115,7 @@ static bool handle_http_request(int sockfd)
                 return false;
             }
             // read the content of the HTML file
-            int filefd = open("lab6-POST.html", O_RDONLY);
+            int filefd = open("INTRO_PAGE", O_RDONLY);
             n = read(filefd, buff, 2048);
             if (n < 0)
             {
@@ -166,44 +153,93 @@ static bool handle_http_request(int sockfd)
     return true;
 }
 
+/* Show Intro Page on users' browser
+ * Derived from lab-6 http-server.c
+ */
+int showIntroPage(int n, char* buff, int sockfd) {
+  // get the size of the file
+  struct stat st;
+  stat(INTRO_PAGE, &st);
+  n = sprintf(buff, HTTP_200_FORMAT, st.st_size);
+  // send the header first
+  if (write(sockfd, buff, n) < 0)
+  {
+      perror("write");
+      return false;
+  }
+  // send the file
+  int filefd = open(INTRO_PAGE, O_RDONLY);
+  do
+  {
+      n = sendfile(sockfd, filefd, NULL, 2048);
+  }
+  while (n > 0);
+  if (n < 0)
+  {
+      perror("sendfile");
+      close(filefd);
+      return false;
+  }
+  close(filefd);
+  return 1;
+}
+
+/* Initialise the server sockets
+ * Derived from lab6 http-server.c
+ */
+int InitialiseServerSocket(const char* readableIP, const int portNumber) {
+  // create TCP socket which only accept IPv4
+  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0)
+  {
+      perror("socket");
+      exit(EXIT_FAILURE);
+  }
+
+  // reuse the socket if possible
+  int const reuse = 1;
+  if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int)) < 0)
+  {
+      perror("setsockopt");
+      exit(EXIT_FAILURE);
+  }
+
+  // create and initialise address we will listen on
+  struct sockaddr_in serv_addr;
+  bzero(&serv_addr, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  // ip address and port number are confugurable using command line
+  serv_addr.sin_addr.s_addr = inet_addr(readableIP);
+  serv_addr.sin_port = htons(portNumber);
+
+  // bind address to socket
+  if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+  {
+      perror("bind");
+      exit(EXIT_FAILURE);
+  }
+
+  return sockfd;
+}
+
+
 int main(int argc, char * argv[])
 {
+    const char* readableIP;
+    int portNumber;
+    int sockfd;
+
+    // check command format
     if (argc < 3)
     {
         fprintf(stderr, "usage: %s ip port\n", argv[0]);
-        return 0;
+      return 0;
     }
 
-    // create TCP socket which only accept IPv4
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
-    {
-        perror("socket");
-        exit(EXIT_FAILURE);
-    }
+    readableIP = argv[1];
+    portNumber = atoi(argv[2]);
 
-    // reuse the socket if possible
-    int const reuse = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int)) < 0)
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-
-    // create and initialise address we will listen on
-    struct sockaddr_in serv_addr;
-    bzero(&serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    // if ip parameter is not specified
-    serv_addr.sin_addr.s_addr = inet_addr(argv[1]);
-    serv_addr.sin_port = htons(atoi(argv[2]));
-
-    // bind address to socket
-    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-    {
-        perror("bind");
-        exit(EXIT_FAILURE);
-    }
+    sockfd = InitialiseServerSocket(readableIP, portNumber);
 
     // listen on the socket
     listen(sockfd, 5);
@@ -215,6 +251,7 @@ int main(int argc, char * argv[])
     // record the maximum socket number
     int maxfd = sockfd;
 
+    // acheive persistent TCP connection
     while (1)
     {
         // monitor file descriptors
@@ -256,7 +293,7 @@ int main(int argc, char * argv[])
                     }
                 }
                 // a request is sent from the client
-                else if (!handle_http_request(i))
+                else if (!handleHttpRequest(i))
                 {
                     close(i);
                     FD_CLR(i, &masterfds);
