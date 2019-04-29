@@ -1,6 +1,8 @@
 /*
-** http-server.c
-*/
+ * image_tagger.c
+ * author: Dongwei Wei
+ * Deived from lab6 http-server.c
+ */
 
 #include <errno.h>
 #include <stdbool.h>
@@ -242,8 +244,14 @@ int main(int argc, char * argv[])
 
     sockfd = InitialiseServerSocket(readableIP, portNumber);
 
-    // listen on the socket
-    listen(sockfd, 5);
+    // listen on the socket, support two connection with two client browser simultaneously
+    if (listen(sockfd, 2) < 0)
+    {
+      perror("listen");
+      exit(EXIT_FAILURE);
+    }
+
+    printf("image_tagger server is now running at IP: %s on port %d\n", readableIP, portNumber);
 
     // initialise an active file descriptors set
     fd_set masterfds;
